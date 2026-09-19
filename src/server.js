@@ -7,6 +7,7 @@ const { createDeck, shuffleDeck, evaluateHand, compareHands } = require('./game/
 
 const app = express();
 app.use(cors());
+app.use(express.static('public'));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -57,8 +58,8 @@ function createRoom(roomId, bigBlind = 100) {
 }
 
 // 获取玩家可视的手牌（只返回自己的手牌）
-function getPlayerVisibleState(room, socket const player = roomId) {
- .players.find(p => p.socketId === socketId);
+function getPlayerVisibleState(room, socketId) {
+  const player = room.players.find(p => p.socketId === socketId);
   const visiblePlayers = room.players.map((p, idx) => ({
     ...p,
     hand: p.socketId === socketId ? p.hand : p.hand.map(() => null),  // 只显示自己的手牌
@@ -216,35 +217,53 @@ function handlePlayerAction(room, playerIndex, action, amount) {
   checkNextPhase(room);
 }
 
+// 发下一街公共牌，推进阶段（河牌后进入摊牌）
+function dealNextStreet(room) {
+  switch (room.phase) {
+    case PHASE.PREFLOP:
+      room.communityCards = [room.deck[room.players.length * 2], room.deck[room.players.length * 2 + 1], room.deck[room.players.length * 2 + 2]];
+      room.phase = PHASE.FLOP;
+      break;
+    case PHASE.FLOP:
+      room.communityCards.push(room.deck[room.players.length * 2 + 3]);
+      room.phase = PHASE.TURN;
+      break;
+    case PHASE.TURN:
+      room.communityCards.push(room.deck[room.players.length * 2 + 4]);
+      room.phase = PHASE.RIVER;
+      break;
+    case PHASE.RIVER:
+      room.phase = PHASE.SHOWDOWN;
+      break;
+  }
+}
+
 // 检查是否进入下一阶段
 function checkNextPhase(room) {
   const activePlayers = room.players.filter(p => !p.isFolded && !p.isAllIn);
+  const unfolded = room.players.filter(p => !p.isFolded);
   const allBetsEqual = activePlayers.every(p => p.currentBet === room.currentBet);
   const allActed = room.waitingPlayers.length === 0;
 
+  // 剩余玩家全部全下：无人可再行动，直接发完剩余公共牌摊牌
+  if (unfolded.length >= 2 && activePlayers.length === 0 && allActed) {
+    while (room.phase !== PHASE.SHOWDOWN) {
+      dealNextStreet(room);
+    }
+    evaluateWinners(room);
+    return;
+  }
+
   if (allBetsEqual && allActed && activePlayers.length > 0) {
     // 进入下一阶段
-    switch (room.phase) {
-      case PHASE.PREFLOP:
-        room.communityCards = [room.deck[room.players.length * 2], room.deck[room.players.length * 2 + 1], room.deck[room.players.length * 2 + 2]];
-        room.phase = PHASE.FLOP;
-        break;
-      case PHASE.FLOP:
-        room.communityCards.push(room.deck[room.players.length * 2 + 3]);
-        room.phase = PHASE.TURN;
-        break;
-      case PHASE.TURN:
-        room.communityCards.push(room.deck[room.players.length * 2 + 4]);
-        room.phase = PHASE.RIVER;
-        break;
-      case PHASE.RIVER:
-        room.phase = PHASE.SHOWDOWN;
-        evaluateWinners(room);
-        return;
+    dealNextStreet(room);
+    if (room.phase === PHASE.SHOWDOWN) {
+      evaluateWinners(room);
+      return;
     }
 
-    // 重置下注
-    room.players.forEach(p => p.currentBet = 0);
+    // 重置下注与上街动作标记
+    room.players.forEach(p => { p.currentBet = 0; p.lastAction = undefined; });
     room.currentBet = 0;
 
     // 确定下一轮行动玩家
@@ -372,6 +391,15 @@ function broadcastGameState(room) {
   });
 }
 
+// 大厅阶段展示用的玩家信息（不含手牌）
+function lobbyPlayers(room) {
+  return room.players.map(p => ({
+    name: p.name,
+    chips: p.chips,
+    isConnected: p.isConnected
+  }));
+}
+
 // Socket.io 连接处理
 io.on('connection', (socket) => {
   console.log('新连接:', socket.id);
@@ -396,7 +424,7 @@ io.on('connection', (socket) => {
     room.players.push(player);
     socket.join(roomId);
 
-    callback({ success: true, roomId, playerIndex: 0 });
+    callback({ success: true, roomId, playerIndex: 0, players: lobbyPlayers(room) });
   });
 
   // 加入房间
@@ -440,7 +468,7 @@ io.on('connection', (socket) => {
       player: { ...player, hand: [null, null] }
     });
 
-    callback({ success: true, playerIndex: room.players.length - 1 });
+    callback({ success: true, playerIndex: room.players.length - 1, players: lobbyPlayers(room) });
   });
 
   // 离开房间
