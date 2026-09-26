@@ -1,593 +1,336 @@
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-const { createDeck, shuffleDeck, evaluateHand, compareHands } = require('./game/pokerLogic');
+const { Table, PHASE } = require('./game/table');
 
-const app = express();
-app.use(cors());
-app.use(express.static('public'));
-
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
-
-// 房间存储
-const rooms = new Map();
-
-// 生成房间ID
-function generateRoomId() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-// 游戏阶段
-const PHASE = {
-  WAITING: 'waiting',
-  PREFLOP: 'preflop',
-  FLOP: 'flop',
-  TURN: 'turn',
-  RIVER: 'river',
-  SHOWDOWN: 'showdown'
+const DEFAULTS = {
+  turnSeconds: Number(process.env.TURN_SECONDS) || 30,             // 每次行动时限
+  disconnectedTurnSeconds: Number(process.env.DISCONNECTED_TURN_SECONDS) || 15, // 掉线玩家的行动时限（留时间刷新重连）
+  sittingOutTurnSeconds: 2,                                         // 暂离/已离开玩家的行动时限
+  nextHandSeconds: Number(process.env.NEXT_HAND_SECONDS) || 8,     // 摊牌后自动开下一局
+  lobbyDisconnectSeconds: 60,                                       // 等待阶段掉线多久后移出房间
+  gameDisconnectSeconds: 5 * 60,                                    // 游戏阶段掉线多久后移出房间
+  emptyRoomSeconds: 10 * 60                                         // 所有人都掉线多久后删除房间
 };
 
-// 创建新房间
-function createRoom(roomId, bigBlind = 100) {
-  const room = {
-    id: roomId,
-    players: [],
-    deck: [],
-    communityCards: [],
-    pot: 0,
-    currentBet: 0,
-    bigBlind,
-    smallBlind: bigBlind / 2,
-    dealerIndex: 0,
-    currentPlayerIndex: -1,
-    phase: PHASE.WAITING,
-    waitingPlayers: [],
-    winners: [],
-    handNumber: 0
-  };
-  rooms.set(roomId, room);
-  return room;
-}
+function createPokerServer(options = {}) {
+  const cfg = { ...DEFAULTS, ...options };
 
-// 获取玩家可视的手牌（只返回自己的手牌）
-function getPlayerVisibleState(room, socketId) {
-  const player = room.players.find(p => p.socketId === socketId);
-  const visiblePlayers = room.players.map((p, idx) => ({
-    ...p,
-    hand: p.socketId === socketId ? p.hand : p.hand.map(() => null),  // 只显示自己的手牌
-    isFolded: p.isFolded,
-    isAllIn: p.isAllIn,
-    isConnected: p.isConnected
-  }));
+  const app = express();
+  app.use(cors());
+  app.use(express.static(path.join(__dirname, '..', 'public')));
+  app.get('/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
 
-  return {
-    roomId: room.id,
-    phase: room.phase,
-    communityCards: room.communityCards,
-    players: visiblePlayers,
-    currentPlayerIndex: room.currentPlayerIndex,
-    pot: room.pot,
-    currentBet: room.currentBet,
-    bigBlind: room.bigBlind,
-    smallBlind: room.smallBlind,
-    dealerIndex: room.dealerIndex,
-    waitingPlayers: room.waitingPlayers,
-    showResult: room.phase === PHASE.SHOWDOWN,
-    winners: room.winners,
-    handNumber: room.handNumber,
-    myIndex: player ? room.players.indexOf(player) : -1
-  };
-}
-
-// 发手牌
-function dealHands(room) {
-  room.deck = shuffleDeck(createDeck());
-  room.players.forEach((player, idx) => {
-    player.hand = [room.deck[idx], room.deck[idx + room.players.length]];
-  });
-}
-
-// 开始新的一局
-function startNewHand(room) {
-  // 重置玩家状态
-  room.players.forEach(player => {
-    player.currentBet = 0;
-    player.isFolded = false;
-    player.isAllIn = false;
-    player.lastAction = undefined;
+  const server = http.createServer(app);
+  const io = new Server(server, {
+    cors: { origin: '*', methods: ['GET', 'POST'] },
+    // 手机切后台时心跳可能暂停，放宽超时减少误判掉线
+    pingInterval: 20000,
+    pingTimeout: 25000
   });
 
-  room.communityCards = [];
-  room.pot = 0;
-  room.currentBet = 0;
-  room.winners = [];
-  room.handNumber++;
+  // roomId -> { table, tokens: Map(token -> playerId), sockets: Map(playerId -> socketId), timers }
+  const rooms = new Map();
 
-  // 发牌
-  dealHands(room);
-
-  // 设置大小盲注
-  const dealerIdx = room.dealerIndex;
-  const smallBlindIdx = (dealerIdx + 1) % room.players.length;
-  const bigBlindIdx = (dealerIdx + 2) % room.players.length;
-
-  const sb = room.players[smallBlindIdx];
-  const bb = room.players[bigBlindIdx];
-
-  if (sb.chips >= room.smallBlind) {
-    sb.currentBet = room.smallBlind;
-    sb.chips -= room.smallBlind;
-    room.pot += room.smallBlind;
+  function generateRoomId() {
+    let id;
+    do {
+      id = Math.random().toString(36).substring(2, 8).toUpperCase().padEnd(6, 'X');
+    } while (rooms.has(id));
+    return id;
   }
 
-  if (bb.chips >= room.bigBlind) {
-    bb.currentBet = room.bigBlind;
-    bb.chips -= room.bigBlind;
-    room.pot += room.bigBlind;
+  function cleanName(name) {
+    const n = String(name || '').trim().slice(0, 12);
+    return n || '玩家';
   }
 
-  room.currentBet = room.bigBlind;
-  room.phase = PHASE.PREFLOP;
-  room.currentPlayerIndex = (bigBlindIdx + 1) % room.players.length;
-  room.waitingPlayers = room.players.map((_, idx) => idx);
-}
+  function createRoom(bigBlind) {
+    const bb = Math.floor(Number(bigBlind));
+    const room = {
+      table: new Table({
+        id: generateRoomId(),
+        bigBlind: Number.isFinite(bb) && bb >= 2 && bb <= 10000 ? bb : 100
+      }),
+      tokens: new Map(),
+      sockets: new Map(),
+      timers: { turn: null, turnKey: null, nextHand: null, away: new Map(), empty: null },
+      turnDeadline: null,
+      nextHandAt: null
+    };
+    rooms.set(room.table.id, room);
+    return room;
+  }
 
-// 处理玩家动作
-function handlePlayerAction(room, playerIndex, action, amount) {
-  const player = room.players[playerIndex];
-  if (!player || player.isFolded) return;
+  function deleteRoom(room) {
+    const t = room.timers;
+    clearTimeout(t.turn);
+    clearTimeout(t.nextHand);
+    clearTimeout(t.empty);
+    t.away.forEach(clearTimeout);
+    rooms.delete(room.table.id);
+  }
 
-  switch (action) {
-    case 'fold':
-      player.isFolded = true;
-      player.lastAction = 'fold';
-      break;
+  function seatPlayer(room, socket, name) {
+    const playerId = uuidv4().slice(0, 8);
+    const token = uuidv4();
+    const res = room.table.addPlayer({ id: playerId, name: cleanName(name) });
+    if (!res.ok) return res;
+    room.tokens.set(token, playerId);
+    attach(room, socket, playerId);
+    return { ok: true, token, playerId };
+  }
 
-    case 'check':
-      if (player.currentBet === room.currentBet) {
-        player.lastAction = 'check';
+  function attach(room, socket, playerId) {
+    const oldSocketId = room.sockets.get(playerId);
+    if (oldSocketId && oldSocketId !== socket.id) {
+      // 同一玩家在新页面登录，踢掉旧连接
+      const old = io.sockets.sockets.get(oldSocketId);
+      if (old) {
+        old.data = {};
+        old.emit('kicked', { reason: '你已在其他页面进入该房间' });
+        old.leave(room.table.id);
       }
-      break;
-
-    case 'call':
-      const callAmount = room.currentBet - player.currentBet;
-      if (callAmount >= player.chips) {
-        // 全下
-        room.pot += player.chips;
-        player.currentBet += player.chips;
-        player.chips = 0;
-        player.isAllIn = true;
-        player.lastAction = 'all-in';
-      } else {
-        room.pot += callAmount;
-        player.currentBet = room.currentBet;
-        player.chips -= callAmount;
-        player.lastAction = 'call';
-      }
-      break;
-
-    case 'raise':
-      const raiseAmount = amount || room.currentBet * 2;
-      const totalBet = player.currentBet + raiseAmount;
-      if (totalBet > player.chips + player.currentBet) return;
-
-      const actualRaise = Math.min(raiseAmount, player.chips - (room.currentBet - player.currentBet));
-      room.pot += actualRaise;
-      room.currentBet = player.currentBet + actualRaise;
-
-      if (player.chips - actualRaise <= 0) {
-        player.currentBet += actualRaise;
-        player.chips = 0;
-        player.isAllIn = true;
-        player.lastAction = 'all-in';
-      } else {
-        player.currentBet += actualRaise;
-        player.chips -= actualRaise;
-        player.lastAction = 'raise';
-      }
-      break;
-
-    case 'all-in':
-      room.pot += player.chips;
-      player.currentBet += player.chips;
-      player.chips = 0;
-      player.isAllIn = true;
-      player.lastAction = 'all-in';
-      if (player.currentBet > room.currentBet) {
-        room.currentBet = player.currentBet;
-      }
-      break;
-  }
-
-  // 移除等待列表
-  const waitIdx = room.waitingPlayers.indexOf(playerIndex);
-  if (waitIdx > -1) {
-    room.waitingPlayers.splice(waitIdx, 1);
-  }
-
-  // 检查是否进入下一轮
-  checkNextPhase(room);
-}
-
-// 发下一街公共牌，推进阶段（河牌后进入摊牌）
-function dealNextStreet(room) {
-  switch (room.phase) {
-    case PHASE.PREFLOP:
-      room.communityCards = [room.deck[room.players.length * 2], room.deck[room.players.length * 2 + 1], room.deck[room.players.length * 2 + 2]];
-      room.phase = PHASE.FLOP;
-      break;
-    case PHASE.FLOP:
-      room.communityCards.push(room.deck[room.players.length * 2 + 3]);
-      room.phase = PHASE.TURN;
-      break;
-    case PHASE.TURN:
-      room.communityCards.push(room.deck[room.players.length * 2 + 4]);
-      room.phase = PHASE.RIVER;
-      break;
-    case PHASE.RIVER:
-      room.phase = PHASE.SHOWDOWN;
-      break;
-  }
-}
-
-// 检查是否进入下一阶段
-function checkNextPhase(room) {
-  const activePlayers = room.players.filter(p => !p.isFolded && !p.isAllIn);
-  const unfolded = room.players.filter(p => !p.isFolded);
-  const allBetsEqual = activePlayers.every(p => p.currentBet === room.currentBet);
-  const allActed = room.waitingPlayers.length === 0;
-
-  // 剩余玩家全部全下：无人可再行动，直接发完剩余公共牌摊牌
-  if (unfolded.length >= 2 && activePlayers.length === 0 && allActed) {
-    while (room.phase !== PHASE.SHOWDOWN) {
-      dealNextStreet(room);
     }
-    evaluateWinners(room);
-    return;
+    room.sockets.set(playerId, socket.id);
+    socket.data = { roomId: room.table.id, playerId };
+    socket.join(room.table.id);
+    clearTimeout(room.timers.away.get(playerId));
+    room.timers.away.delete(playerId);
+    clearTimeout(room.timers.empty);
+    room.timers.empty = null;
+    room.table.setConnected(playerId, true);
   }
 
-  if (allBetsEqual && allActed && activePlayers.length > 0) {
-    // 进入下一阶段
-    dealNextStreet(room);
-    if (room.phase === PHASE.SHOWDOWN) {
-      evaluateWinners(room);
-      return;
-    }
-
-    // 重置下注与上街动作标记
-    room.players.forEach(p => { p.currentBet = 0; p.lastAction = undefined; });
-    room.currentBet = 0;
-
-    // 确定下一轮行动玩家
-    const nextPlayer = room.players.findIndex((p, idx) => !p.isFolded && !p.isAllIn && idx !== room.currentPlayerIndex);
-    room.currentPlayerIndex = nextPlayer > -1 ? nextPlayer : room.currentPlayerIndex;
-
-    // 更新等待列表
-    room.waitingPlayers = [];
-    room.players.forEach((_, idx) => {
-      if (!room.players[idx].isFolded && !room.players[idx].isAllIn) {
-        room.waitingPlayers.push(idx);
-      }
-    });
-  } else {
-    // 下一位玩家
-    let nextIdx = (room.currentPlayerIndex + 1) % room.players.length;
-    let attempts = 0;
-    while ((room.players[nextIdx].isFolded || room.players[nextIdx].isAllIn) && attempts < room.players.length) {
-      nextIdx = (nextIdx + 1) % room.players.length;
-      attempts++;
-    }
-    room.currentPlayerIndex = nextIdx;
+  function currentRoom(socket) {
+    const { roomId, playerId } = socket.data || {};
+    const room = roomId && rooms.get(roomId);
+    if (!room || !playerId || room.sockets.get(playerId) !== socket.id) return null;
+    if (!room.table.getPlayer(playerId)) return null;
+    return { room, playerId };
   }
 
-  // 广播游戏状态
-  broadcastGameState(room);
-}
-
-// 评估赢家
-function evaluateWinners(room) {
-  const results = [];
-  const activePlayers = room.players
-    .map((player, index) => ({ player, index }))
-    .filter(({ player }) => !player.isFolded);
-
-  if (activePlayers.length === 0) {
-    // 所有人都弃牌
-    const lastBetter = room.players.findIndex(p => p.currentBet > 0);
-    if (lastBetter > -1) {
-      results.push({
-        playerIndex: lastBetter,
-        hand: [],
-        rank: 'high_card',
-        description: '对手弃牌获胜'
+  // 广播状态 + 维护计时器
+  function sync(room) {
+    const { table } = room;
+    if (!rooms.has(table.id)) return;
+    scheduleTimers(room);
+    const now = Date.now();
+    table.players.forEach(p => {
+      const sid = room.sockets.get(p.id);
+      if (!sid || !p.connected) return;
+      io.to(sid).emit('gameState', {
+        ...table.getState(p.id),
+        turnDeadline: room.turnDeadline,
+        nextHandAt: room.nextHandAt,
+        serverNow: now
       });
-      room.players[lastBetter].chips += room.pot;
-    }
-  } else if (activePlayers.length === 1) {
-    const { player, index } = activePlayers[0];
-    const result = evaluateHand([...player.hand, ...room.communityCards]);
-    results.push({
-      playerIndex: index,
-      hand: [...player.hand, ...room.communityCards],
-      rank: result.rank,
-      description: result.description
     });
-    player.chips += room.pot;
-  } else {
-    // 比牌
-    let bestIndex = -1;
-    let bestHand = [];
-    let bestResult = { rank: 'high_card', highCards: [], description: '' };
+  }
 
-    activePlayers.forEach(({ player, index }) => {
-      const fullHand = [...player.hand, ...room.communityCards];
-      const result = evaluateHand(fullHand);
+  function scheduleTimers(room) {
+    const { table, timers } = room;
 
-      if (bestIndex === -1 || compareHands(fullHand, bestHand) > 0) {
-        bestIndex = index;
-        bestHand = fullHand;
-        bestResult = result;
+    // 行动计时
+    if (table.isHandLive()) {
+      const cur = table.players[table.currentPlayerIndex];
+      const key = `${table.handNumber}:${table.actionCount}:${table.currentPlayerIndex}`;
+      if (cur && key !== timers.turnKey) {
+        clearTimeout(timers.turn);
+        timers.turnKey = key;
+        const secs = cur.sittingOut || cur.left ? cfg.sittingOutTurnSeconds
+          : cur.connected ? cfg.turnSeconds : cfg.disconnectedTurnSeconds;
+        room.turnDeadline = Date.now() + secs * 1000;
+        timers.turn = setTimeout(() => {
+          timers.turnKey = null;
+          if (table.isHandLive() && table.players[table.currentPlayerIndex] === cur) {
+            table.autoAct();
+            sync(room);
+          }
+        }, secs * 1000);
       }
-    });
-
-    // 检查平手
-    const tiedPlayers = activePlayers.filter(({ player, index }) => {
-      if (index === bestIndex) return false;
-      const hand = [...player.hand, ...room.communityCards];
-      return compareHands(hand, bestHand) === 0;
-    });
-
-    if (tiedPlayers.length > 0) {
-      const splitPot = Math.floor(room.pot / (tiedPlayers.length + 1));
-      results.push({
-        playerIndex: bestIndex,
-        hand: bestHand,
-        rank: bestResult.rank,
-        description: `与${tiedPlayers.length}人平分底池`
-      });
-      room.players[bestIndex].chips += splitPot;
-
-      tiedPlayers.forEach(({ index, player }) => {
-        const hand = [...player.hand, ...room.communityCards];
-        const result = evaluateHand(hand);
-        results.push({
-          playerIndex: index,
-          hand,
-          rank: result.rank,
-          description: '平分底池'
-        });
-        player.chips += splitPot;
-      });
     } else {
-      results.push({
-        playerIndex: bestIndex,
-        hand: bestHand,
-        rank: bestResult.rank,
-        description: bestResult.description
-      });
-      room.players[bestIndex].chips += room.pot;
-    }
-  }
-
-  room.winners = results;
-  room.phase = PHASE.SHOWDOWN;
-
-  broadcastGameState(room);
-}
-
-// 广播游戏状态到房间所有玩家
-function broadcastGameState(room) {
-  room.players.forEach(player => {
-    const state = getPlayerVisibleState(room, player.socketId);
-    io.to(player.socketId).emit('gameState', state);
-  });
-}
-
-// 大厅阶段展示用的玩家信息（不含手牌）
-function lobbyPlayers(room) {
-  return room.players.map(p => ({
-    name: p.name,
-    chips: p.chips,
-    isConnected: p.isConnected
-  }));
-}
-
-// Socket.io 连接处理
-io.on('connection', (socket) => {
-  console.log('新连接:', socket.id);
-
-  // 创建房间
-  socket.on('createRoom', (data, callback) => {
-    const roomId = generateRoomId();
-    const room = createRoom(roomId, data.bigBlind || 100);
-
-    const player = {
-      socketId: socket.id,
-      name: data.name || '玩家',
-      chips: 2000,
-      currentBet: 0,
-      hand: [],
-      isFolded: false,
-      isAllIn: false,
-      isConnected: true,
-      lastAction: undefined
-    };
-
-    room.players.push(player);
-    socket.join(roomId);
-
-    callback({ success: true, roomId, playerIndex: 0, players: lobbyPlayers(room) });
-  });
-
-  // 加入房间
-  socket.on('joinRoom', (data, callback) => {
-    const { roomId, name } = data;
-    const room = rooms.get(roomId);
-
-    if (!room) {
-      callback({ success: false, error: '房间不存在' });
-      return;
+      clearTimeout(timers.turn);
+      timers.turnKey = null;
+      room.turnDeadline = null;
     }
 
-    if (room.players.length >= 9) {
-      callback({ success: false, error: '房间已满' });
-      return;
-    }
-
-    if (room.phase !== PHASE.WAITING) {
-      callback({ success: false, error: '游戏已开始，无法加入' });
-      return;
-    }
-
-    const player = {
-      socketId: socket.id,
-      name: name || '玩家',
-      chips: 2000,
-      currentBet: 0,
-      hand: [],
-      isFolded: false,
-      isAllIn: false,
-      isConnected: true,
-      lastAction: undefined
-    };
-
-    room.players.push(player);
-    socket.join(roomId);
-
-    // 通知其他玩家
-    socket.to(roomId).emit('playerJoined', {
-      playerIndex: room.players.length - 1,
-      player: { ...player, hand: [null, null] }
-    });
-
-    callback({ success: true, playerIndex: room.players.length - 1, players: lobbyPlayers(room) });
-  });
-
-  // 离开房间
-  socket.on('leaveRoom', (data, callback) => {
-    handlePlayerLeave(socket, callback);
-  });
-
-  // 开始游戏
-  socket.on('startGame', (data, callback) => {
-    const room = rooms.get(data.roomId);
-    if (!room) {
-      callback({ success: false, error: '房间不存在' });
-      return;
-    }
-
-    const player = room.players.find(p => p.socketId === socket.id);
-    if (!player || room.players.indexOf(player) !== 0) {
-      callback({ success: false, error: '只有房主可以开始游戏' });
-      return;
-    }
-
-    if (room.players.length < 2) {
-      callback({ success: false, error: '需要至少2名玩家' });
-      return;
-    }
-
-    startNewHand(room);
-    broadcastGameState(room);
-
-    callback({ success: true });
-  });
-
-  // 玩家动作
-  socket.on('playerAction', (data) => {
-    const { roomId, action, amount } = data;
-    const room = rooms.get(roomId);
-
-    if (!room) return;
-
-    const player = room.players.find(p => p.socketId === socket.id);
-    if (!player) return;
-
-    const playerIndex = room.players.indexOf(player);
-    if (playerIndex !== room.currentPlayerIndex) return;
-
-    handlePlayerAction(room, playerIndex, action, amount);
-  });
-
-  // 下一局
-  socket.on('nextHand', (data, callback) => {
-    const room = rooms.get(data.roomId);
-    if (!room) return;
-
-    // 检查是否所有玩家都准备好了
-    const activePlayers = room.players.filter(p => p.chips > 0);
-    if (activePlayers.length < 2) {
-      callback({ success: false, error: '玩家不足' });
-      return;
-    }
-
-    // 移动庄家
-    room.dealerIndex = (room.dealerIndex + 1) % room.players.length;
-
-    // 重置玩家状态
-    room.players.forEach(player => {
-      player.currentBet = 0;
-      player.hand = [];
-      player.isFolded = false;
-      player.isAllIn = false;
-      player.lastAction = undefined;
-    });
-
-    startNewHand(room);
-    broadcastGameState(room);
-
-    callback({ success: true });
-  });
-
-  // 断开连接
-  socket.on('disconnect', () => {
-    handlePlayerLeave(socket);
-  });
-
-  function handlePlayerLeave(socket, callback) {
-    for (const [roomId, room] of rooms.entries()) {
-      const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
-      if (playerIndex > -1) {
-        const player = room.players[playerIndex];
-
-        // 如果是游戏进行中，标记为断开连接
-        if (room.phase !== PHASE.WAITING) {
-          player.isConnected = false;
-          socket.to(roomId).emit('playerDisconnected', { playerIndex });
-
-          // 如果是当前行动玩家，自动弃牌
-          if (playerIndex === room.currentPlayerIndex) {
-            handlePlayerAction(room, playerIndex, 'fold');
-          }
-        } else {
-          // 等待阶段，直接移除玩家
-          room.players.splice(playerIndex, 1);
-          socket.to(roomId).emit('playerLeft', { playerIndex });
-
-          // 如果房间空了，删除房间
-          if (room.players.length === 0) {
-            rooms.delete(roomId);
-          }
-        }
-
-        if (callback) {
-          callback({ success: true });
-        }
-        break;
+    // 摊牌后自动开下一局
+    if (table.phase === PHASE.SHOWDOWN) {
+      if (!timers.nextHand) {
+        room.nextHandAt = Date.now() + cfg.nextHandSeconds * 1000;
+        timers.nextHand = setTimeout(() => startNextHand(room), cfg.nextHandSeconds * 1000);
       }
+    } else {
+      clearTimeout(timers.nextHand);
+      timers.nextHand = null;
+      room.nextHandAt = null;
     }
   }
-});
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`服务器运行在端口 ${PORT}`);
-});
+  function startNextHand(room) {
+    clearTimeout(room.timers.nextHand);
+    room.timers.nextHand = null;
+    // 已离开/掉线的人不再占座
+    const res = room.table.startHand();
+    sync(room);
+    return res;
+  }
+
+  // 房主不在线时，其他玩家也可以开局
+  function canControl(room, playerId) {
+    const host = room.table.getPlayer(room.table.hostId);
+    return playerId === room.table.hostId || !host || !host.connected;
+  }
+
+  function handleLeave(room, playerId) {
+    const { table } = room;
+    table.removePlayer(playerId);
+    for (const [token, id] of room.tokens) {
+      if (id === playerId) room.tokens.delete(token);
+    }
+    room.sockets.delete(playerId);
+    clearTimeout(room.timers.away.get(playerId));
+    room.timers.away.delete(playerId);
+
+    if (table.players.every(p => p.left)) {
+      // 所有人都离开了（包括牌局中离开、尚未移除的人）
+      deleteRoom(room);
+      return;
+    }
+    // 等待阶段只剩 1 人时不会自动开局；牌局阶段由 table 自行处理
+    sync(room);
+  }
+
+  io.on('connection', (socket) => {
+    const reply = (cb, payload) => { if (typeof cb === 'function') cb(payload); };
+
+    socket.on('createRoom', (data = {}, cb) => {
+      const room = createRoom(data.bigBlind);
+      const res = seatPlayer(room, socket, data.name);
+      reply(cb, { success: true, roomId: room.table.id, token: res.token, playerId: res.playerId });
+      sync(room);
+    });
+
+    socket.on('joinRoom', (data = {}, cb) => {
+      const roomId = String(data.roomId || '').trim().toUpperCase();
+      const room = rooms.get(roomId);
+      if (!room) return reply(cb, { success: false, error: '房间不存在' });
+      const res = seatPlayer(room, socket, data.name);
+      if (!res.ok) return reply(cb, { success: false, error: res.error });
+      reply(cb, { success: true, roomId, token: res.token, playerId: res.playerId });
+      sync(room);
+    });
+
+    // 刷新页面 / 断线重连后回到原座位
+    socket.on('resume', (data = {}, cb) => {
+      const roomId = String(data.roomId || '').trim().toUpperCase();
+      const room = rooms.get(roomId);
+      const playerId = room && room.tokens.get(data.token);
+      const player = playerId && room.table.getPlayer(playerId);
+      if (!player || player.left) return reply(cb, { success: false, error: '座位已失效，请重新加入' });
+      attach(room, socket, playerId);
+      reply(cb, { success: true, roomId, playerId });
+      sync(room);
+    });
+
+    socket.on('leaveRoom', (data, cb) => {
+      const ctx = currentRoom(socket);
+      if (ctx) {
+        socket.leave(ctx.room.table.id);
+        socket.data = {};
+        handleLeave(ctx.room, ctx.playerId);
+      }
+      reply(cb, { success: true });
+    });
+
+    socket.on('startGame', (data, cb) => {
+      const ctx = currentRoom(socket);
+      if (!ctx) return reply(cb, { success: false, error: '你不在房间中' });
+      const { room, playerId } = ctx;
+      if (!canControl(room, playerId)) return reply(cb, { success: false, error: '只有房主可以开始游戏' });
+      if (room.table.isHandLive()) return reply(cb, { success: false, error: '牌局进行中' });
+      const res = startNextHand(room);
+      reply(cb, res.ok ? { success: true } : { success: false, error: res.error });
+    });
+
+    // 摊牌后立即开下一局（不等倒计时）
+    socket.on('nextHand', (data, cb) => {
+      const ctx = currentRoom(socket);
+      if (!ctx) return reply(cb, { success: false, error: '你不在房间中' });
+      const { room, playerId } = ctx;
+      if (room.table.phase !== PHASE.SHOWDOWN) return reply(cb, { success: false, error: '这局还没结束' });
+      if (!canControl(room, playerId)) return reply(cb, { success: false, error: '只有房主可以开始下一局' });
+      const res = startNextHand(room);
+      reply(cb, res.ok ? { success: true } : { success: false, error: res.error });
+    });
+
+    socket.on('playerAction', (data = {}, cb) => {
+      const ctx = currentRoom(socket);
+      if (!ctx) return reply(cb, { success: false, error: '你不在房间中' });
+      const res = ctx.room.table.act(ctx.playerId, data.action, data.amount);
+      reply(cb, res.ok ? { success: true } : { success: false, error: res.error });
+      if (res.ok) sync(ctx.room);
+    });
+
+    socket.on('rebuy', (data, cb) => {
+      const ctx = currentRoom(socket);
+      if (!ctx) return reply(cb, { success: false, error: '你不在房间中' });
+      const res = ctx.room.table.rebuy(ctx.playerId);
+      reply(cb, res.ok ? { success: true } : { success: false, error: res.error });
+      if (res.ok) sync(ctx.room);
+    });
+
+    socket.on('sitIn', (data, cb) => {
+      const ctx = currentRoom(socket);
+      if (!ctx) return reply(cb, { success: false, error: '你不在房间中' });
+      const res = ctx.room.table.sitIn(ctx.playerId);
+      reply(cb, res.ok ? { success: true } : { success: false, error: res.error });
+      if (res.ok) sync(ctx.room);
+    });
+
+    socket.on('disconnect', () => {
+      const ctx = currentRoom(socket);
+      if (!ctx) return;
+      const { room, playerId } = ctx;
+      const { table, timers } = room;
+      table.setConnected(playerId, false);
+
+      // 给一段时间刷新/重连回来，否则移出房间，避免一直占座
+      const awaySecs = table.phase === PHASE.WAITING ? cfg.lobbyDisconnectSeconds : cfg.gameDisconnectSeconds;
+      clearTimeout(timers.away.get(playerId));
+      timers.away.set(playerId, setTimeout(() => {
+        timers.away.delete(playerId);
+        const p = table.getPlayer(playerId);
+        if (p && !p.connected && rooms.has(table.id)) handleLeave(room, playerId);
+      }, awaySecs * 1000));
+
+      if (table.players.every(p => !p.connected) && !timers.empty) {
+        timers.empty = setTimeout(() => {
+          if (table.players.every(p => !p.connected)) deleteRoom(room);
+        }, cfg.emptyRoomSeconds * 1000);
+      }
+
+      // 掉线的是当前行动者时，缩短其行动时限
+      if (table.isHandLive() && table.players[table.currentPlayerIndex]?.id === playerId) {
+        timers.turnKey = null;
+      }
+      sync(room);
+    });
+  });
+
+  return { app, server, io, rooms };
+}
+
+if (require.main === module) {
+  const { server } = createPokerServer();
+  const PORT = process.env.PORT || 3001;
+  server.listen(PORT, () => {
+    console.log(`服务器运行在端口 ${PORT}`);
+  });
+}
+
+module.exports = { createPokerServer };
