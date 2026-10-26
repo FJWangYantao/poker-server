@@ -113,6 +113,16 @@ function createPokerServer(options = {}) {
     return { room, playerId };
   }
 
+  // 一个连接只坐一张桌子：建房/换房前先把手上的房间退掉，
+  // 否则旧房间里的玩家永远在线、清理计时器也不会启动（房间泄漏）
+  function leaveCurrent(socket) {
+    const ctx = currentRoom(socket);
+    if (!ctx) { socket.data = {}; return; }
+    socket.leave(ctx.room.table.id);
+    socket.data = {};
+    handleLeave(ctx.room, ctx.playerId);
+  }
+
   // 广播状态 + 维护计时器
   function sync(room) {
     const { table } = room;
@@ -209,6 +219,7 @@ function createPokerServer(options = {}) {
     const reply = (cb, payload) => { if (typeof cb === 'function') cb(payload); };
 
     socket.on('createRoom', (data = {}, cb) => {
+      leaveCurrent(socket);   // 连点「开始牌局」时先退出上一个房间，否则旧房间会永远留在内存里
       const room = createRoom(data.bigBlind);
       const res = seatPlayer(room, socket, data.name);
       reply(cb, { success: true, roomId: room.table.id, token: res.token, playerId: res.playerId });
@@ -217,6 +228,13 @@ function createPokerServer(options = {}) {
 
     socket.on('joinRoom', (data = {}, cb) => {
       const roomId = String(data.roomId || '').trim().toUpperCase();
+      // 已在这张桌上：直接当成成功（防止重复点击把自己挤掉）
+      const here = currentRoom(socket);
+      if (here && here.room.table.id === roomId) {
+        const token = [...here.room.tokens].find(([, id]) => id === here.playerId);
+        return reply(cb, { success: true, roomId, token: token && token[0], playerId: here.playerId });
+      }
+      leaveCurrent(socket);   // 同一个人在一个连接里只坐一张桌子
       const room = rooms.get(roomId);
       if (!room) return reply(cb, { success: false, error: '房间不存在' });
       const res = seatPlayer(room, socket, data.name);
@@ -238,12 +256,7 @@ function createPokerServer(options = {}) {
     });
 
     socket.on('leaveRoom', (data, cb) => {
-      const ctx = currentRoom(socket);
-      if (ctx) {
-        socket.leave(ctx.room.table.id);
-        socket.data = {};
-        handleLeave(ctx.room, ctx.playerId);
-      }
+      leaveCurrent(socket);
       reply(cb, { success: true });
     });
 

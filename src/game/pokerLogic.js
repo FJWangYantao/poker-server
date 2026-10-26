@@ -157,6 +157,19 @@ function evaluateHand(cards) {
   return best;
 }
 
+// 描述玩家“现在”的牌面：翻牌前只看两张手牌（成对/高牌），翻牌后从 7 张里取最大 5 张
+function describeCurrent(cards) {
+  const list = cards.filter(Boolean);
+  if (list.length < 2) return null;
+  if (list.length < 5) {
+    const [hi, lo] = list.map(getCardValue).sort((a, b) => b - a);
+    if (hi === lo) return `${HAND_TYPES.pair.name} ${valueName(hi)}`;
+    return `${HAND_TYPES.high_card.name} ${valueName(hi)}`;
+  }
+  const best = evaluateHand(list);
+  return best ? best.description : null;
+}
+
 // 比较两手牌（各自传入全部可用牌）
 function compareHands(hand1, hand2) {
   return compareResults(evaluateHand(hand1), evaluateHand(hand2));
@@ -166,6 +179,7 @@ module.exports = {
   createDeck,
   shuffleDeck,
   evaluateHand,
+  describeCurrent,
   compareHands,
   compareResults
 };

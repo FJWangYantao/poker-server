@@ -1,5 +1,5 @@
 // 牌桌状态机：只管规则，不涉及网络与计时（由 server.js 负责）
-const { createDeck, shuffleDeck, evaluateHand, compareResults } = require('./pokerLogic');
+const { createDeck, shuffleDeck, evaluateHand, describeCurrent, compareResults } = require('./pokerLogic');
 
 const PHASE = {
   WAITING: 'waiting',
@@ -511,6 +511,11 @@ class Table {
   getState(viewerId) {
     const shown = new Set(this.result ? this.result.hands.map(h => h.id) : []);
     const myIndex = this.players.findIndex(p => p.id === viewerId);
+    const mine = myIndex >= 0 ? this.players[myIndex] : null;
+    // 只用自己的手牌 + 公共牌算，不会泄漏别人的牌
+    const currentHand = mine && mine.hand.length === 2
+      ? describeCurrent([...mine.hand, ...this.communityCards])
+      : null;
     return {
       roomId: this.id,
       phase: this.phase,
@@ -528,6 +533,7 @@ class Table {
       pot: this.pot,
       communityCards: this.communityCards,
       legal: this.legalActions(viewerId),
+      currentHand,
       result: this.result,
       players: this.players.map(p => ({
         id: p.id,

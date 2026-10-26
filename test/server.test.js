@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { io: connect } = require('socket.io-client');
 const { createPokerServer } = require('../src/server');
+const { describeCurrent } = require('../src/game/pokerLogic');
 
 let srv, url;
 const clients = [];
@@ -211,4 +212,42 @@ test('牌局中所有人离开后房间被删除', async () => {
   await socks[0].call('leaveRoom');
   await socks[1].call('leaveRoom');
   assert.equal(srv.rooms.has(roomId), false);
+});
+
+test('同一连接连点建房：旧房间被清掉，不留下孤儿房间', async () => {
+  const s = await client();
+  const first = await s.call('createRoom', { name: 'A' });
+  assert.ok(first.success);
+  assert.ok(srv.rooms.has(first.roomId));
+
+  const second = await s.call('createRoom', { name: 'A' });
+  assert.ok(second.success);
+  assert.equal(srv.rooms.has(first.roomId), false, '旧房间应当被删除');
+  assert.ok(srv.rooms.has(second.roomId));
+
+  await s.call('leaveRoom');
+  assert.equal(srv.rooms.has(second.roomId), false);
+});
+
+test('重复加入同一房间不会占两个座位，也不会丢掉座位', async () => {
+  const { socks, roomId } = await setupRoom(['A', 'B']);
+  const before = socks[1].state.players.length;
+  const res = await socks[1].call('joinRoom', { roomId, name: 'B' });
+  assert.ok(res.success, res.error);
+  const st = await until(socks[0], s => s.players.length === before);
+  assert.equal(st.players.length, before, '座位数不变');
+  assert.equal(st.players[st.myIndex].name, 'A');
+});
+
+test('当前牌型只按自己的手牌算，且随时可看', async () => {
+  const { socks } = await setupRoom(['A', 'B']);
+  await socks[0].call('startGame');
+  const st = await until(socks[0], s => s.phase === 'preflop');
+  const mine = st.players[st.myIndex].hand;
+  assert.equal(st.currentHand, describeCurrent([...mine, ...st.communityCards]));
+  assert.ok(st.currentHand && st.currentHand.length > 0);
+  // 别人视角看不到我的牌，手牌是 null
+  const other = await until(socks[1], s => s.phase === 'preflop');
+  assert.equal(other.players[st.myIndex].hand[0], null);
+  assert.equal(st.players[other.myIndex].hand[0], null);
 });

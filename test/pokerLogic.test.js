@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateHand, compareHands, createDeck, shuffleDeck } = require('../src/game/pokerLogic');
+const { evaluateHand, describeCurrent, compareHands, createDeck, shuffleDeck } = require('../src/game/pokerLogic');
 
 // '10♠ J♥' -> [{rank:'10',suit:'♠'}, ...]
 const c = s => s.split(' ').map(x => ({ rank: x.slice(0, -1), suit: x.slice(-1) }));
@@ -66,4 +66,18 @@ test('同牌型比踢脚，完全相同为平手', () => {
 test('描述文字', () => {
   assert.equal(evaluateHand(c('K♠ K♥ 9♦ 4♣ 2♠ 3♦ 7♣')).description, '一对 K');
   assert.equal(evaluateHand(c('5♠ 6♥ 7♦ 8♣ 9♠ K♥ 2♦')).description, '顺子（9 高）');
+});
+
+test('翻牌前只看两张手牌：成对/高牌', () => {
+  assert.equal(describeCurrent(c('A♠ A♥')), '一对 A');
+  assert.equal(describeCurrent(c('K♦ 7♣')), '高牌 K');
+  assert.equal(describeCurrent(c('2♠ 2♥')), '一对 2');
+});
+
+test('翻牌后给出当前最大牌型，缺牌返回 null', () => {
+  assert.equal(describeCurrent(c('A♠ A♥ 9♦ 4♣ 2♠')), '一对 A');
+  assert.equal(describeCurrent(c('A♠ K♥ Q♦ J♣ 10♠ 3♦ 2♣')), '顺子（A 高）');
+  assert.equal(describeCurrent(c('A♠ A♥ K♦ K♣ 2♠ 7♦ 9♣')), '两对 A 和 K');
+  assert.equal(describeCurrent(c('A♠')), null);
+  assert.equal(describeCurrent([]), null);
 });

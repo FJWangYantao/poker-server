@@ -29,6 +29,8 @@ input{font-family:inherit}
 /* ============ 通用按钮 ============ */
 .btn{border-radius:10px;font-weight:700;letter-spacing:1px;transition:transform .08s,filter .15s}
 .btn:active{transform:scale(.96)}
+/* 键盘操作时给出清晰的焦点框（鼠标点击不显示，避免影响观感） */
+:focus-visible{outline:2px solid var(--gold-light);outline-offset:2px}
 .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 .btn.big{padding:13px 18px;font-size:17px;width:100%}
 .btn.small{padding:5px 12px;font-size:12px}
@@ -42,7 +44,7 @@ input{font-family:inherit}
 .btn.ghost:hover:not(:disabled){border-color:rgba(243,236,216,.7)}
 
 /* ============ 大厅 ============ */
-#lobby-screen{height:100vh;display:flex;align-items:center;justify-content:center}
+#lobby-screen{height:100vh;height:100dvh;display:flex;align-items:center;justify-content:center}
 .lobby-card,.room-card{
   background:linear-gradient(180deg,#123524,#0b2417);
   border:1px solid var(--line);border-radius:18px;padding:34px 30px;
@@ -80,7 +82,7 @@ input{font-family:inherit}
 #join-panel{width:100%}
 
 /* ============ 等待室 ============ */
-#room-screen{height:100vh;display:flex;align-items:center;justify-content:center}
+#room-screen{height:100vh;height:100dvh;display:flex;align-items:center;justify-content:center}
 .hint{font-size:12px;color:rgba(243,236,216,.55)}
 .room-id{
   font-size:42px;font-weight:900;letter-spacing:12px;
@@ -96,7 +98,7 @@ input{font-family:inherit}
 #room-actions{display:flex;flex-direction:column;gap:10px;width:100%;align-items:center}
 
 /* ============ 游戏屏 ============ */
-#game-screen{display:flex;flex-direction:column;height:100vh}
+#game-screen{display:flex;flex-direction:column;height:100vh;height:100dvh}
 #game-screen > header{
   display:flex;align-items:center;gap:16px;padding:9px 16px;
   background:var(--panel);border-bottom:1px solid var(--line);font-size:13px;flex-shrink:0;
@@ -249,6 +251,7 @@ input{font-family:inherit}
 #me-info .txt{display:flex;flex-direction:column;gap:3px;min-width:0}
 #me-info .nm{font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;max-width:110px}
 #me-info .cips{color:var(--gold-light);font-weight:700}
+#me-info .myhand{font-size:11px;color:#9fe0b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:112px}
 #action-bar{flex:1;display:flex;flex-direction:column;gap:9px;align-items:flex-end}
 #turn-status{font-size:13px;color:#cfe6d6}
 #turn-status.my{color:var(--gold-light);font-weight:800;font-size:15px}
@@ -257,6 +260,11 @@ input{font-family:inherit}
 #raise-box{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.3);
   border:1px solid rgba(243,236,216,.2);border-radius:12px;padding:8px 12px}
 #raise-slider{width:150px;accent-color:var(--gold)}
+#raise-input{width:76px;padding:5px 6px;text-align:center;font-size:13px;font-weight:700;color:var(--gold-light);
+  background:rgba(0,0,0,.4);border:1px solid rgba(243,236,216,.3);border-radius:8px;outline:none;
+  -moz-appearance:textfield}
+#raise-input:focus{border-color:var(--gold)}
+#raise-input::-webkit-outer-spin-button,#raise-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 #raise-val{font-weight:800;color:var(--gold-light);min-width:66px;text-align:center;font-size:14px}
 #quick-row{display:flex;gap:6px}
 #quick-row .btn{padding:5px 10px;font-size:12px;white-space:nowrap;background:rgba(243,236,216,.08);
@@ -288,6 +296,14 @@ input{font-family:inherit}
   animation:dealIn .25s ease-out}
 #conn-lost{position:fixed;inset:0;background:rgba(4,12,8,.88);z-index:100;
   display:flex;flex-direction:column;gap:16px;align-items:center;justify-content:center;font-size:17px}
+/* 请求进行中的按钮：禁用感 + 呼吸，避免连点发两次 */
+.btn.busy{opacity:.6;cursor:progress;transform:none}
+#confirm-bar{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:97;
+  display:flex;gap:10px;align-items:center;padding:12px 16px;border-radius:14px;
+  background:rgba(12,26,18,.97);border:1px solid var(--line);box-shadow:0 12px 40px rgba(0,0,0,.6);
+  font-size:14px;max-width:min(560px,92vw);animation:dealIn .2s ease-out}
+#confirm-bar .msg{flex:1;line-height:1.4;color:var(--ink)}
+#confirm-bar .btn{padding:7px 16px;font-size:13px;flex-shrink:0}
 
 /* ============ 新增：计时 / 状态标签 / 重连 ============ */
 .room-id{display:block}
@@ -295,7 +311,9 @@ input{font-family:inherit}
 .tag.wait{background:#2d5d8a;color:#e6f1ff}
 .tag.host{background:transparent;padding:0}
 .p-timer{height:3px;border-radius:2px;background:rgba(243,236,216,.15);margin-top:4px;overflow:hidden}
-.p-timer > i{display:block;height:100%;background:var(--gold);transition:width .25s linear}
+/* 用 transform 缩放代替 width：不触发布局，250ms 一次的刷新不再引起重排 */
+.p-timer > i{display:block;height:100%;background:var(--gold);transform-origin:left center;
+  transform:scaleX(1);transition:transform .25s linear}
 .p-timer.low > i{background:#e05a4e}
 .hole.shown .card{border-radius:8%}
 .hole.shown .card:last-child{margin-left:2px}
@@ -338,7 +356,8 @@ input{font-family:inherit}
   .p-chips{font-size:10px}
   #bottom-bar{gap:10px;padding:10px}
   #actions .btn{padding:9px 14px;font-size:13px}
-  #raise-slider{width:auto;flex:1;min-width:110px}
+  #raise-slider{width:auto;flex:1;min-width:90px}
+  #raise-input{width:64px}
   #action-bar{flex-basis:100%;align-items:stretch;gap:7px}
   #turn-status{text-align:center}
   #actions{justify-content:center;gap:8px}
@@ -463,14 +482,14 @@ input{font-family:inherit}
     <div id="my-cards"></div>
     <div id="me-info"></div>
     <div id="action-bar">
-      <div id="turn-status"></div>
+      <div id="turn-status" role="status" aria-live="polite"></div>
       <div id="actions"></div>
     </div>
   </div>
 </div>
 
 <!-- 结算弹层 -->
-<div id="showdown" class="hidden">
+<div id="showdown" class="hidden" role="dialog" aria-modal="true" aria-labelledby="sd-title" title="点空白处关闭">
   <div class="panel">
     <h2 id="sd-title">摊牌</h2>
     <div id="sd-pots"></div>
@@ -538,6 +557,31 @@ function toast(msg, ms = 2600){
   $('toast-box').appendChild(d);
   setTimeout(() => d.remove(), ms);
 }
+// 自绘确认条：confirm() 会阻塞渲染、移动端样式难看，还会打断正在跑的动画
+let confirmBarEl = null;
+function confirmBar(msg, okText, onOk){
+  closeConfirmBar();
+  const bar = document.createElement('div');
+  bar.id = 'confirm-bar';
+  bar.setAttribute('role', 'alertdialog');
+  bar.setAttribute('aria-label', msg);
+  const text = document.createElement('span');
+  text.className = 'msg'; text.textContent = msg;
+  const ok = document.createElement('button');
+  ok.className = 'btn red small'; ok.textContent = okText || '确定';
+  const no = document.createElement('button');
+  no.className = 'btn ghost small'; no.textContent = '取消';
+  ok.onclick = () => { closeConfirmBar(); onOk && onOk(); };
+  no.onclick = closeConfirmBar;
+  bar.append(text, no, ok);
+  document.body.appendChild(bar);
+  confirmBarEl = bar;
+  ok.focus();
+  return bar;
+}
+function closeConfirmBar(){
+  if (confirmBarEl){ confirmBarEl.remove(); confirmBarEl = null; }
+}
 function fmt(n){ return Number(n||0).toLocaleString('zh-CN'); }
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -581,11 +625,42 @@ function copyInvite(){
   (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject())
     .then(() => toast('邀请链接已复制，发给好友即可加入'), () => toast('房间号: ' + state.roomId));
 }
-function send(ev, data){
-  return new Promise(resolve => socket.emit(ev, data || {}, res => {
-    if (res && !res.success && res.error) toast(res.error);
-    resolve(res || {});
-  }));
+// 统一发请求：带超时。之前没有超时，一旦服务端不回调（断线/异常），
+// await 就永远挂着，act() 的 acting 锁再也解不开，之后所有行动按钮全失效。
+function send(ev, data, timeoutMs = 8000){
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = res => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (res && !res.success && res.error && res.error !== TIMEOUT) toast(res.error);
+      resolve(res || { success: false, error: TIMEOUT });
+    };
+    const timer = setTimeout(() => {
+      if (!socket.connected){ toast('网络已断开，正在重连…'); }
+      else toast('服务器响应超时，请重试');
+      finish({ success: false, error: TIMEOUT });
+    }, timeoutMs);
+    if (!socket.connected){
+      // 断线时 socket.io 会把包缓存到重连后，这里直接失败，避免按钮看起来没反应
+      finish({ success: false, error: '网络已断开' });
+      return;
+    }
+    socket.emit(ev, data || {}, finish);
+  });
+}
+const TIMEOUT = 'timeout';
+// 给按钮上锁：连点只会发一次请求（大厅「开始牌局」连点会建出两个房间）
+function bindBusy(btn, fn){
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    if (btn.dataset.busy) return;
+    btn.dataset.busy = '1';
+    btn.classList.add('busy');
+    try { await fn(); }
+    finally { btn.dataset.busy = ''; btn.classList.remove('busy'); }
+  });
 }
 function iAmController(){
   if (!state) return false;
@@ -658,15 +733,15 @@ function applyLobbyMode(){
 applyLobbyMode();
 
 // 被邀请进来但想自己开桌
-$('btn-create-other').onclick = () => {
+bindBusy($('btn-create-other'), () => {
   urlRoom = '';
   history.replaceState(null, '', location.pathname);
   $('room-input').value = '';
   $('join-panel').classList.add('hidden');
   $('btn-toggle-join').textContent = '我有房间号';
   applyLobbyMode();
-  createRoom();
-};
+  return createRoom();
+});
 $('btn-toggle-join').onclick = () => {
   const shown = !$('join-panel').classList.contains('hidden');
   $('join-panel').classList.toggle('hidden', shown);
@@ -678,9 +753,9 @@ async function createRoom(){
   const res = await send('createRoom', { name: getName(), bigBlind: 100 });
   if (res.success) saveSession({ roomId: res.roomId, token: res.token });
 }
-$('btn-primary').onclick = () => (urlRoom ? joinRoom(urlRoom) : createRoom());
+bindBusy($('btn-primary'), () => (urlRoom ? joinRoom(urlRoom) : createRoom()));
 
-$('btn-join').onclick = () => joinRoom();
+bindBusy($('btn-join'), () => joinRoom());
 $('room-input').addEventListener('keydown', e => { if (e.key === 'Enter') joinRoom(); });
 async function joinRoom(roomIdArg){
   const roomId = String(roomIdArg || $('room-input').value || '').trim().toUpperCase();
@@ -737,13 +812,15 @@ function button(text, color, onclick){
 $('room-id').onclick = copyInvite;
 $('btn-copy-invite').onclick = copyInvite;
 $('g-room').onclick = copyInvite;
-$('btn-start').onclick = () => send('startGame');
+bindBusy($('btn-start'), () => send('startGame'));
 $('btn-leave-waiting').onclick = leave;
 $('btn-leave-game').onclick = () => {
   const m = me();
   const inHand = m && m.inHand && !m.folded && state.phase !== 'showdown' && state.phase !== 'waiting';
-  if (!confirm(inHand ? '牌局进行中离开将自动弃牌，确定离开？' : '确定离开牌桌？')) return;
-  leave();
+  confirmBar(
+    inHand ? '牌局进行中离开将自动弃牌，确定离开？' : '确定离开牌桌？',
+    '离开', () => leave()
+  );
 };
 
 /* ---------- 状态接收 ---------- */
@@ -896,8 +973,8 @@ function makeSeatView(p){
   chipsEl.className = 'p-chips';
   const timer = document.createElement('div');
   timer.className = 'p-timer hidden';
-  timer.setAttribute('data-timer', '');
-  timer.innerHTML = '<i></i>';
+  const timerFill = document.createElement('i');
+  timer.appendChild(timerFill);
   body.append(nameEl, chipsEl, timer);
   plaque.append(avatar, body);
 
@@ -908,7 +985,18 @@ function makeSeatView(p){
   hole.className = 'hole hidden';
 
   el.append(plaque, bubble, hole);
-  return { el, plaque, avatar, nameEl, chipsEl, timer, bubble, hole,
+  // 计时条：只有百分比/低电量状态真的变化时才写样式
+  let timerPct = -1, timerLow = null;
+  const setTimer = (pct, left) => {
+    const rounded = Math.round(pct);
+    if (rounded !== timerPct){
+      timerPct = rounded;
+      timerFill.style.transform = `scaleX(${rounded / 100})`;
+    }
+    const low = left < 8000;
+    if (low !== timerLow){ timerLow = low; timer.classList.toggle('low', low); }
+  };
+  return { el, plaque, avatar, nameEl, chipsEl, timer, bubble, hole, setTimer,
            holeKey: '', cards: [], sig: {}, lastBet: 0, lastBetRect: null,
            lastAllIn: !!p.allIn };
 }
@@ -957,6 +1045,7 @@ function syncSeats(s){
     const nameKey = (p.id === s.hostId ? 'H' : '-') + '|' + (i === s.myIndex ? 'M' : '-') + '|' + p.name + '|' + tags;
     if (v.sig.name !== nameKey){
       v.sig.name = nameKey;
+      v.nameEl.title = p.name;   // 长昵称被 CSS 截断，悬停看全名
       v.nameEl.innerHTML = `${p.id === s.hostId ? '👑' : ''}${escapeHtml(p.name)}` +
         `${i === s.myIndex ? ' <span style="opacity:.5;font-size:10px">(你)</span>' : ''}${tags}`;
     }
@@ -1167,9 +1256,12 @@ function syncMeInfo(s){
     nm.className = 'nm';
     const cips = document.createElement('span');
     cips.className = 'cips';
-    txt.append(nm, cips);
+    // 当前牌型提示：翻牌前就能看到「一对 A / 高牌 K」，翻牌后随公共牌更新
+    const hand = document.createElement('span');
+    hand.className = 'myhand hidden';
+    txt.append(nm, cips, hand);
     mi.append(av, txt);
-    meInfoEls = { av, nm, cips, name: '', chips: null };
+    meInfoEls = { av, nm, cips, handEl: hand, name: '', chips: null, hand: null };
   }
   if (meInfoEls.name !== m.name){
     meInfoEls.name = m.name;
@@ -1181,6 +1273,12 @@ function syncMeInfo(s){
   if (meInfoEls.chips !== m.chips){
     meInfoEls.chips = m.chips;
     meInfoEls.cips.textContent = `筹码 ${fmt(m.chips)}`;
+  }
+  const handText = s.currentHand || '';
+  if (meInfoEls.hand !== handText){
+    meInfoEls.hand = handText;
+    meInfoEls.handEl.textContent = handText ? `当前 ${handText}` : '';
+    meInfoEls.handEl.classList.toggle('hidden', !handText);
   }
 }
 
@@ -1245,62 +1343,112 @@ function renderActions(){
   const myTurn = !!L;
   bar.classList.toggle('my-turn', myTurn);
   actions.innerHTML = '';
+  uiActions = null;
 
   if (!myTurn){
     status.classList.remove('my');
+    turnSecsEl = null;
     if (s.phase === 'showdown') status.textContent = '本局结束';
     else {
       const cur = s.players[s.currentPlayerIndex];
       status.innerHTML = cur ? `等待 ${escapeHtml(cur.name)} 行动 <span data-secs></span>` : '';
+      turnSecsEl = status.querySelector('[data-secs]');
     }
     return;
   }
 
   status.innerHTML = '轮到你行动 <span data-secs></span>';
+  turnSecsEl = status.querySelector('[data-secs]');
   status.classList.add('my');
 
-  const myBet = m.bet;
   const { minRaiseTo: minTo, maxRaiseTo: maxTo } = L;
 
-  actions.appendChild(button('弃牌', 'red', () => act('fold')));
-  if (L.canCheck) actions.appendChild(button('过牌', 'teal', () => act('check')));
-  else actions.appendChild(button(L.toCall >= m.chips ? `全下跟注 ${fmt(m.chips)}` : `跟注 ${fmt(L.toCall)}`, 'teal', () => act('call')));
+  const foldBtn = button('弃牌', 'red', () => act('fold'));
+  foldBtn.title = '弃牌（F）';
+  const callBtn = button(L.canCheck ? '过牌' : (L.toCall >= m.chips ? `全下跟注 ${fmt(m.chips)}` : `跟注 ${fmt(L.toCall)}`), 'teal',
+    () => act(L.canCheck ? 'check' : 'call'));
+  callBtn.title = (L.canCheck ? '过牌' : '跟注') + '（C）';
+  actions.append(foldBtn, callBtn);
   actions.querySelectorAll('.btn').forEach(b => b.style.padding = '');
+
+  // 键盘快捷键用的动作句柄（没有加注权时只有弃牌/跟注）
+  uiActions = {
+    fold: () => act('fold'),
+    call: () => act(L.canCheck ? 'check' : 'call')
+  };
 
   if (!L.canRaise) return;
 
   // 加注组：金额均为"本街加注到"的总额
   const box = document.createElement('div');
   box.id = 'raise-box';
+  const step = Math.max(1, Math.round(s.smallBlind));
   const slider = document.createElement('input');
   slider.id = 'raise-slider'; slider.type = 'range';
-  slider.min = minTo; slider.max = maxTo;
-  slider.step = Math.max(1, Math.round(s.smallBlind));
+  slider.min = minTo; slider.max = maxTo; slider.step = step;
+  slider.setAttribute('aria-label', '加注金额');
+
+  // 数字输入框：滑杆适合粗调，精确额度还得能敲（原来只能拖）
+  const num = document.createElement('input');
+  num.id = 'raise-input'; num.type = 'number'; num.inputMode = 'numeric';
+  num.min = minTo; num.max = maxTo; num.step = step;
+  num.setAttribute('aria-label', '加注金额（可直接输入）');
 
   const val = document.createElement('span'); val.id = 'raise-val';
   const btn = document.createElement('button');
   btn.className = 'btn gold'; btn.style.padding = '9px 16px';
+  btn.title = '确认加注（Enter）';
 
   const turnKey = s.handNumber + ':' + s.phase + ':' + s.currentBet;
   let to = lastRaiseTo;
   if (to === null || turnKey !== lastTurnKey || to < minTo || to > maxTo) to = minTo;
   lastTurnKey = turnKey;
 
+  // 夹到 [minTo, maxTo] 并按小盲取整；接近上限就直接算全下
+  function clampTo(v){
+    if (!Number.isFinite(v)) return to;
+    if (v >= maxTo) return maxTo;
+    const snapped = Math.round(v / step) * step;
+    return Math.min(maxTo, Math.max(minTo, snapped));
+  }
   function paint(){
     slider.value = to;
+    if (document.activeElement !== num) num.value = to;
     const allin = to >= maxTo;
     val.textContent = (allin ? '全下 ' : '') + fmt(to);
     btn.textContent = allin ? `全下 ${fmt(maxTo)}` : (s.currentBet > 0 ? `加注到 ${fmt(to)}` : `下注 ${fmt(to)}`);
+    slider.setAttribute('aria-valuetext', (allin ? '全下 ' : '') + fmt(to));
+    num.setAttribute('aria-valuetext', (allin ? '全下 ' : '') + fmt(to));
   }
-  slider.oninput = () => {
-    to = Number(slider.value);
-    if (maxTo - to < Number(slider.step)) to = maxTo;
-    lastRaiseTo = to; paint();
-  };
-  btn.onclick = () => {
+  function commit(){
     lastRaiseTo = null;
     if (to >= maxTo) act('all-in'); else act('raise', to);
+  }
+  slider.oninput = () => {
+    to = clampTo(Number(slider.value));
+    lastRaiseTo = to; paint();
   };
+  btn.onclick = commit;
+  num.addEventListener('input', () => {
+    // 输入过程中不打断用户：只同步内部值，提交/失焦时再归位
+    const v = Number(num.value);
+    if (num.value === '' || !Number.isFinite(v)) return;
+    to = clampTo(v);
+    lastRaiseTo = to;
+    slider.value = to;
+  });
+  num.addEventListener('change', () => { num.value = to; });
+  num.addEventListener('blur', () => { num.value = to; });
+  num.addEventListener('keydown', e => {
+    e.stopPropagation();          // 别让全局快捷键抢走输入
+    if (e.key === 'Enter'){ num.value = to; commit(); }
+    else if (e.key === 'Escape'){ num.value = to; num.blur(); }
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowDown'){
+      e.preventDefault();
+      to = clampTo(to + (e.key === 'ArrowUp' ? step : -step));
+      lastRaiseTo = to; paint();
+    }
+  });
 
   const potAfterCall = s.pot + L.toCall;
   const quick = document.createElement('div'); quick.id = 'quick-row';
@@ -1311,24 +1459,54 @@ function renderActions(){
     const q = document.createElement('button');
     q.className = 'btn'; q.textContent = label;
     q.onclick = () => {
-      const v = f();
-      to = v >= maxTo ? maxTo : Math.max(minTo, Math.round(v / Number(slider.step)) * Number(slider.step));
+      to = clampTo(f());
       lastRaiseTo = to; paint();
     };
     quick.appendChild(q);
   });
 
-  box.appendChild(slider); box.appendChild(val); box.appendChild(quick); box.appendChild(btn);
+  box.appendChild(slider); box.appendChild(num); box.appendChild(val);
+  box.appendChild(quick); box.appendChild(btn);
   actions.appendChild(box);
   paint();
+
+  uiActions.raise = commit;
+  uiActions.focusRaise = () => { num.focus(); num.select(); };
+  uiActions.nudge = dir => {
+    to = clampTo(to + dir * step);
+    lastRaiseTo = to; paint();
+  };
 }
 let acting = false;
+let uiActions = null;   // 当前轮次可用的行动句柄，供键盘快捷键调用（不在轮次内则为 null）
+
+// 键盘操作：F 弃牌 / C 过牌或跟注 / R 聚焦加注输入 / ←→ 微调 / Enter 确认
+document.addEventListener('keydown', e => {
+  if (!uiActions || confirmBarEl) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const tag = e.target && e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === 'f'){ e.preventDefault(); uiActions.fold(); }
+  else if (k === 'c'){ e.preventDefault(); uiActions.call(); }
+  else if (k === 'r'){ if (!uiActions.focusRaise) return; e.preventDefault(); uiActions.focusRaise(); }
+  else if (k === 'ArrowLeft' || k === 'ArrowRight'){
+    if (!uiActions.nudge) return;
+    e.preventDefault();
+    uiActions.nudge(k === 'ArrowRight' ? 1 : -1);
+  } else if (k === 'Enter' && uiActions.raise){ e.preventDefault(); uiActions.raise(); }
+});
+
 async function act(action, amount){
   if (acting) return;          // 防止连点
   acting = true;
   lastRaiseTo = null;
-  await send('playerAction', { action, amount });
-  acting = false;
+  try {
+    const res = await send('playerAction', { action, amount });
+    if (!res.success) renderActions();  // 失败（超时/被拒）后按最新状态重画按钮
+  } finally {
+    acting = false;
+  }
 }
 
 /* ---------- 结算 ---------- */
@@ -1389,10 +1567,28 @@ function renderShowdown(){
   const m = me();
   if (m && m.chips === 0) btns.appendChild(button(`补充筹码 ${fmt(s.startingChips)}`, 'teal', () => send('rebuy')));
   if (m && m.sittingOut) btns.appendChild(button('回到座位', 'teal', () => send('sitIn')));
-  btns.appendChild(button('查看牌桌', 'ghost', () => { sdHiddenFor = s.handNumber; box.classList.add('hidden'); }));
+  btns.appendChild(button('查看牌桌', 'ghost', hideShowdown));
 }
 
+// 结算层之前只能点一个小按钮关掉：补上点空白处和 Esc
+function hideShowdown(){
+  if (state) sdHiddenFor = state.handNumber;
+  $('showdown').classList.add('hidden');
+}
+$('showdown').addEventListener('click', e => {
+  if (e.target === $('showdown')) hideShowdown();
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (confirmBarEl) return closeConfirmBar();
+  if (!$('showdown').classList.contains('hidden')) hideShowdown();
+});
+
 /* ---------- 倒计时 ---------- */
+// 只在数值真的变化时才写 DOM；计时条用 transform 缩放，避免每 250ms 触发重排。
+// 之前是每次全文档 querySelectorAll 两遍，8 人桌每秒要扫 16 次。
+let turnSecsEl = null;      // 行动区的 "· Ns"，renderActions 重建时更新
+const sdCountEl = $('sd-count');
 function tick(){
   if (!state) return;
   const s = state;
@@ -1400,18 +1596,32 @@ function tick(){
     const left = Math.max(0, s.turnDeadline - serverNow());
     const total = Math.max(1, s.turnDeadline - s.serverNow);
     const secs = Math.ceil(left / 1000);
-    document.querySelectorAll('[data-secs]').forEach(e => { e.textContent = `· ${secs}s`; });
-    document.querySelectorAll('[data-timer]').forEach(e => {
-      e.firstChild.style.width = (100 * left / total) + '%';
-      e.classList.toggle('low', left < 8000);
-    });
+    const txt = `· ${secs}s`;
+    if (turnSecsEl && turnSecsEl.textContent !== txt) turnSecsEl.textContent = txt;
+    const pct = Math.max(0, Math.min(100, 100 * left / total));
+    seatViews.forEach(v => v.setTimer(pct, left));
   }
   if (s.phase === 'showdown' && s.nextHandAt){
     const secs = Math.max(0, Math.ceil((s.nextHandAt - serverNow()) / 1000));
-    $('sd-count').textContent = `${secs} 秒后自动开始下一局`;
+    const txt = `${secs} 秒后自动开始下一局`;
+    if (sdCountEl && sdCountEl.textContent !== txt) sdCountEl.textContent = txt;
   }
 }
-setInterval(tick, 250);
+// 页面不可见时不跑计时器（移动端省电，回来立刻补一帧）
+let tickTimer = 0;
+function startTicker(){
+  if (tickTimer) return;
+  tickTimer = setInterval(tick, 250);
+}
+function stopTicker(){
+  clearInterval(tickTimer);
+  tickTimer = 0;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopTicker();
+  else { startTicker(); tick(); }
+});
+startTicker();
 
 /* ---------- 连接 ---------- */
 socket.on('connect', async () => {
