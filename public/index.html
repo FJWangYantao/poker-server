@@ -357,7 +357,9 @@ input{font-family:inherit}
   #bottom-bar{gap:10px;padding:10px}
   #actions .btn{padding:9px 14px;font-size:13px}
   #raise-slider{width:auto;flex:1;min-width:90px}
-  #raise-input{width:64px}
+  /* 窄屏：输入框自己就能显示金额，右边重复的数字标签省掉，把宽度让给输入框 */
+  #raise-input{width:84px}
+  #raise-val{display:none}
   #action-bar{flex-basis:100%;align-items:stretch;gap:7px}
   #turn-status{text-align:center}
   #actions{justify-content:center;gap:8px}
@@ -847,7 +849,24 @@ function seatPos(i, n){
   // 横向：名牌最宽 152px（含头像），桌面内侧留白约 70px => 最多 36%；纵向还要让开牌和间距
   const rx = Math.min(46, 36 / Math.max(0.2, Math.abs(cos)));
   const ry = Math.min(42, 32.5 / Math.max(0.2, Math.abs(sin)));
-  return { x: 50 + rx * cos, y: 50 + ry * sin, top: sin < -0.05 };
+  let x = 50 + rx * cos;
+  let y = 50 + ry * sin;
+
+  // 窄屏避让：手机竖屏时中央的底池+公共牌几乎占满桌面宽度，
+  // 处在水平两侧的座位（cos 很大、sin 接近 0，比如 4 人桌的左右两家）
+  // 会正好压在公共牌上。这里把这类座位沿纵向推开，让出中间那条带。
+  // 只对 6 人以内生效：8 人桌两侧各挤了 3 个座位，纵向没有余量可让，
+  // 硬推会和相邻座位叠在一起（实测），那种桌子只能接受轻微遮挡。
+  const w = ($('table-wrap') || {}).clientWidth || 0;
+  if (w && w < 560 && n <= 6 && Math.abs(cos) > 0.55){
+    const flat = Math.abs(sin) < 0.3;
+    // 正侧面的座位没有天然上下方向，按"前半圈向上、后半圈向下"分配，左右对称
+    const dir = flat
+      ? ((((i - base) % n) + n) % n < n / 2 ? -1 : 1)
+      : Math.sign(sin);
+    y = 50 + dir * Math.max(Math.abs(ry * sin), 26);
+  }
+  return { x, y, top: y < 50 };
 }
 
 const live = s => ['preflop','flop','turn','river'].includes(s.phase);
@@ -1436,6 +1455,7 @@ function renderActions(){
     to = clampTo(v);
     lastRaiseTo = to;
     slider.value = to;
+    paint();                      // 同步金额文案，否则输入了 300 按钮还显示 200
   });
   num.addEventListener('change', () => { num.value = to; });
   num.addEventListener('blur', () => { num.value = to; });
