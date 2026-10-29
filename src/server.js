@@ -21,7 +21,22 @@ function createPokerServer(options = {}) {
 
   const app = express();
   app.use(cors());
-  app.use(express.static(path.join(__dirname, '..', 'public')));
+
+  // 静态资源缓存策略：文件名带版本号的才能长缓存。
+  //   /assets/tex/*、/assets/chips/*：名字里含 -v1 这类版本号，内容变了必须改名，
+  //     因此可以 immutable 一年，浏览器连协商请求都不发。
+  //   /assets/css/*、index.html：名字不带版本，必须每次协商（ETag → 304），
+  //     否则改了样式老用户看不到。html 显式 no-cache，避免中间层缓存住旧页面。
+  const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+  const IMMUTABLE = { maxAge: '365d', immutable: true, index: false };
+  app.use('/assets/tex', express.static(path.join(PUBLIC_DIR, 'assets', 'tex'), IMMUTABLE));
+  app.use('/assets/chips', express.static(path.join(PUBLIC_DIR, 'assets', 'chips'), IMMUTABLE));
+  app.use(express.static(PUBLIC_DIR, {
+    etag: true,
+    setHeaders(res, filePath) {
+      if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+    }
+  }));
   app.get('/health', (req, res) => res.json({ ok: true, rooms: rooms.size }));
 
   const server = http.createServer(app);

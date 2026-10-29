@@ -1,0 +1,204 @@
+/* ============================================================================
+   克制拟物 · 设计 token
+   ----------------------------------------------------------------------------
+   三层结构，规则里只允许引用 token，不写任何 hex / rgba 字面量：
+     1. 调色板（--c-*）  ：原始值，机械收敛自原先散落的 137 个色值。
+     2. 语义层（--c-text / --sh-raise / --r-md ...）：描述"用在哪"，优先使用。
+     3. 资产与动效       ：纹理、筹码 sprite、动效曲线。
+
+   三条纪律：
+     1. 颜色只从本文件取。规则里出现字面量即为 bug（已无）。
+     2. 阴影只有 3 档，光一律来自左上，同一处最多 2 层。
+     3. 金色（--c-accent）全站可见处不超过 3 个。拟物翻车几乎都是金色滥用。
+   ============================================================================ */
+
+/* ============================================================================
+   一、调色板
+   ----------------------------------------------------------------------------
+   · 纯色 --c-<族>：一个值一个 token。不做跨值合并——合并会改变观感，
+     属于设计决策，留待设计确认后单独做。
+   · 叠加色 --c-<族>-<alpha×100>：同族不同透明度。同族内按 0.05 容差合并，
+     最大实际偏差 0.03（实测全页最大通道差 8/255，肉眼不可辨）。
+   · 族名只是分组，不代表语义；语义见第二段。
+   ============================================================================ */
+
+:root {
+  --c-felt-1: #0b2417;
+  --c-felt-2: #123524;
+  --c-felt-3: #143726;
+  --c-felt-4: #0c1f14;
+  --c-surface: rgba(13,31,21,0.96);
+  --c-surface-deep: rgba(6,16,11,0.98);
+  --c-surface-soft: rgba(8,20,14,0.66);
+  --c-scrim: rgba(4,12,8,0.72);
+  --c-scrim-deep: rgba(4,12,8,0.88);
+  --c-felt-radial: rgba(9,38,24,0.82);
+  --c-felt-fade: rgba(15,63,40,0.0);
+  --c-gold: #d4af37;
+  --c-gold-light: #f3d97b;
+  --c-gold-bright: #ffe9a8;
+  --c-gold-warm: #e8c766;
+  --c-gold-deep: #b98f2c;
+  --c-gold-dark: #8a6d1c;
+  --c-gold-shadow: #3a2c05;
+  --c-gold-hi: rgba(255,238,190,0.12);
+  --c-gold-glow: rgba(255,212,110,0.75);
+  --c-gold-12: rgba(212,175,55,0.12);
+  --c-gold-25: rgba(212,175,55,0.25);
+  --c-gold-40: rgba(212,175,55,0.40);
+  --c-gold-55: rgba(212,175,55,0.55);
+  --c-gold-82: rgba(212,175,55,0.82);
+  --c-gold-light-22: rgba(243,217,123,0.22);
+  --c-gold-light-60: rgba(243,217,123,0.60);
+  --c-gold-light-90: rgba(243,217,123,0.90);
+  --c-ink: #f3ecd8;
+  --c-ink-10: rgba(243,236,216,0.10);
+  --c-ink-20: rgba(243,236,216,0.20);
+  --c-ink-32: rgba(243,236,216,0.32);
+  --c-ink-50: rgba(243,236,216,0.50);
+  --c-ink-60: rgba(243,236,216,0.60);
+  --c-ink-75: rgba(243,236,216,0.75);
+  --c-ink-85: rgba(243,236,216,0.85);
+  --c-black-25: rgba(0,0,0,0.25);
+  --c-black-40: rgba(0,0,0,0.40);
+  --c-black-55: rgba(0,0,0,0.55);
+  --c-black-70: rgba(0,0,0,0.70);
+  --c-black-85: rgba(0,0,0,0.85);
+  --c-white: #ffffff;
+  --c-white-06: rgba(255,255,255,0.06);
+  --c-white-15: rgba(255,255,255,0.15);
+  --c-white-22: rgba(255,255,255,0.22);
+  --c-white-40: rgba(255,255,255,0.40);
+  --c-white-60: rgba(255,255,255,0.60);
+  --c-green: #1a7b60;
+  --c-green-deep: #14563f;
+  --c-green-light: #3fae8f;
+  --c-green-bright: #7fe0b0;
+  --c-green-bright-2: #9fe0b8;
+  --c-green-pale: #cfe6d6;
+  --c-green-50: rgba(26,123,96,0.50);
+  --c-red: #d0192b;
+  --c-red-2: #c8102e;
+  --c-red-deep: #b3202c;
+  --c-red-dark: #7d1420;
+  --c-red-bright: #e05a4e;
+  --c-red-flash-55: rgba(255,72,60,0.55);
+  --c-red-dark-35: rgba(130,0,0,0.35);
+  --c-red-deep-35: rgba(179,32,44,0.35);
+  --c-neutral-2: #1b1b1b;
+  --c-neutral-3: #5c5c5c;
+  --c-neutral-5: #e6e6e6;
+  --c-neutral-1-92: rgba(18,18,18,0.92);
+  --c-rail-1: #96693a;
+  --c-rail-3: #5b3d21;
+  --c-paper-2: #f3f0e3;
+  --c-paper-3: #e4e0d0;
+  --c-paper-edge: #cfc9b4;
+  --c-blue: #274c9e;
+  --c-blue-deep: #16295e;
+  --c-blue-mid: #2d5d8a;
+  --c-blue-pale: #e6f1ff;
+  --c-blue-mid-35: rgba(45,93,138,0.35);
+  --c-warm-14: rgba(255,236,196,0.14);
+  --c-chip-50: #345792;
+  --c-chip-100: #3c3c3f;
+  --c-chip-500: #603c7b;
+  --c-chip-1000: #c6aa4a;
+}
+
+/* ============================================================================
+   二、语义层
+   ----------------------------------------------------------------------------
+   颜色一律指向调色板，不重复写字面量。
+   目前只有 8 个语义 token 真正被规则引用（--c-text / --c-line / --r-pill /
+   --fs-xs / --tex-felt / --chip-w / --chip-overlap / --sprite-chip-fly）；
+   标「未接线」的是组件改造时的目标值，现在删掉不会影响渲染。
+   注意：规则里目前多数颜色直接引用调色板（如 var(--c-gold)），
+   等组件逐个改造时再收拢到语义层，否则「金色 ≤3 处」这条纪律无法落地。
+   ============================================================================ */
+
+:root {
+  /* ---- 表面层级：从页面底到最高层 ---- */
+  --c-bg: var(--c-felt-4);             /* 未接线 · 页面底 */
+  --c-surface-1: var(--c-surface);   /* 未接线 · 面板 / 名牌 */
+  --c-surface-2: var(--c-felt-3);      /* 未接线 · 浮起块 */
+  --c-surface-3: var(--c-felt-2);      /* 未接线 · 当前行动 */
+
+  /* ---- 文字 ---- */
+  --c-text: var(--c-ink);              /* 已接线 */
+  --c-text-dim: var(--c-ink-60);       /* 未接线 */
+  --c-text-faint: var(--c-ink-20);     /* 未接线 · 次要说明文字 */
+
+  /* ---- 线与强调 ---- */
+  --c-line: var(--c-warm-14);          /* 已接线 · 分隔线（中性暖白，不用金） */
+  /* 强调金：只用于"决策相关"的信息，全站 3 处（轮到你 / 加注金额 / 赢家）。
+     桌沿、描边、内高光用的是 --c-gold-* 结构金，属于材质，不计入此限。 */
+  --c-accent: var(--c-gold-light);     /* 已接线 · 3 处 */
+
+  /* ---- 花色与纸白 ---- */
+  /* 毛毡明暗 --c-felt-deep/mid/light 与纸白 --c-paper 直接用调色板里的同名 token */
+  --c-suit-red: var(--c-red-2);
+  --c-suit-black: var(--c-neutral-2);
+
+
+  /* ---- 筹码色：必须与 public/assets/chips/ 渲染出的主色一致，
+         所以这几个保持字面量，改色要重渲染 sprite ---- */
+  --c-chip-50: #345792;
+  --c-chip-100: #3c3c3f;
+  --c-chip-500: #603c7b;
+  --c-chip-1000: #c6aa4a;
+
+  /* ---- 阴影：3 档，光来自左上 ---- */
+  --sh-raise: 0 1px 0 var(--c-white-06), 0 2px 6px var(--c-black-55);
+  --sh-float: 0 2px 8px var(--c-black-55), 0 10px 28px var(--c-black-40);
+  --sh-inset: inset 0 1px 0 var(--c-white-06);
+
+  /* ---- 圆角：4 档。牌面固定 6px（百分比圆角在小尺寸上会被拉伸） ---- */
+  --r-card: 6px;
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-pill: 999px;
+
+  /* ---- 字号阶梯 ---- */
+  --fs-xs: 10px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 16px;
+  --fs-xl: 22px;
+
+  /* ---- 动效：一条曲线，轻回弹 ---- */
+  --motion-raise: 260ms cubic-bezier(.34, 1.4, .5, 1);
+
+  /* ---- 资产 ---- */
+  --tex-felt: url('/assets/tex/felt-512-v1.webp');
+  --asset-chips: '/assets/chips';      /* 由 JS 拼 chip-{面额}-x{枚数}-v{版本}.webp */
+  /* 飞行筹码用的单枚 100 图。版本号必须与 index.html 的 ASSET_VERSION
+     和 tools/build_chips.py 的 CHIP_VERSION 一致。 */
+  --sprite-chip-fly: url('/assets/chips/chip-100-x1-v1.webp');
+
+  /* ---- 筹码堆显示尺寸 ---- */
+  --chip-w: 26px;                      /* 窄屏；桌面在下方放大 */
+  --chip-overlap: -3px;                /* 相邻两摞的水平重叠 */
+}
+
+@media (min-width: 900px) {
+  :root {
+    --chip-w: 32px;
+    --chip-overlap: -4px;
+  }
+}
+
+/* 窄屏：座位、手牌、下注筹码挤在同一个环上，筹码必须缩小才不压住座位牌 */
+@media (max-width: 720px) {
+  :root {
+    --chip-w: 19px;
+    --chip-overlap: -2px;
+  }
+}
+
+/* 尊重系统「减少动态效果」：动效时长归零，token 层面统一处理 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-raise: 1ms linear;
+  }
+}
